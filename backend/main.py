@@ -14,7 +14,7 @@ load_dotenv()
 
 # --- CONFIGURATION ---
 # Replace with your actual key from https://aistudio.google.com/
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyC6p7FR_8G9akIuS7Ub8tIOpbwHm5-lNFc")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
 
 # Initialize Gemini with the latest Gemini 3 model
 if GEMINI_API_KEY and "YOUR_GEMINI" not in GEMINI_API_KEY:
