@@ -39,7 +39,8 @@ app.add_middleware(
 )
 
 # --- DATABASE SETUP ---
-DB_PATH = "sportguard.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "sportguard.db")
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -237,4 +238,6 @@ async def trend_analytics():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Use environment variable PORT for cloud hosting (Render/Heroku/Google Cloud)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

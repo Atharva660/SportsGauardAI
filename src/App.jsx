@@ -24,7 +24,7 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
 
 const SidebarItem = ({ icon: Icon, label, active, onClick }) => (
   <button 
@@ -116,6 +116,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedAsset, setSelectedAsset] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
   const fileInputRef = React.useRef(null);
 
   useEffect(() => {
@@ -138,6 +141,14 @@ export default function App() {
       setAssets(aRes.data);
       setPlatformData(pRes.data);
       setTrendData(tRes.data);
+      
+      // Check for new detections and add to notifications
+      const lastKnown = detections[0]?.timestamp || 0;
+      const news = dRes.data.filter(d => d.timestamp > lastKnown && d.timestamp > (Date.now()/1000 - 60));
+      if (news.length > 0) {
+        setNotifications(prev => [...news, ...prev].slice(0, 5));
+      }
+      
       setLoading(false);
     } catch (err) {
       console.error("Fetch error", err);
@@ -175,8 +186,10 @@ export default function App() {
         </nav>
 
         <div className="mt-auto pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-          <SidebarItem icon={Settings} label="Settings" />
-          <SidebarItem icon={LogOut} label="Sign Out" />
+          <SidebarItem icon={Settings} label="Settings" active={showSettings} onClick={() => setShowSettings(true)} />
+          <SidebarItem icon={LogOut} label="Sign Out" onClick={() => {
+            if(window.confirm("Are you sure you want to sign out?")) window.location.reload();
+          }} />
         </div>
       </aside>
 
@@ -193,9 +206,15 @@ export default function App() {
               <div className="live-indicator"></div>
               <span className="text-xs font-bold text-rose-400" style={{ letterSpacing: '1px' }}>LIVE SCRAWL ACTIVE</span>
             </div>
-            <button className="glass-panel p-2 border-none cursor-pointer" style={{ position: 'relative' }}>
-              <Bell size={20} className="text-white" />
-              <span style={{ position: 'absolute', top: '0', right: '0', width: '8px', height: '8px', background: '#00f2ff', borderRadius: '50%', border: '2px solid black' }}></span>
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="glass-panel p-2 border-none cursor-pointer" 
+              style={{ position: 'relative' }}
+            >
+              <Bell size={20} className={notifications.length > 0 ? "text-cyan-400" : "text-white"} />
+              {notifications.length > 0 && (
+                <span style={{ position: 'absolute', top: '0', right: '0', width: '8px', height: '8px', background: '#00f2ff', borderRadius: '50%', border: '2px solid black' }}></span>
+              )}
             </button>
             <div className="w-10 h-10 rounded-full bg-white/10" style={{ border: '1px solid rgba(255,255,255,0.1)' }}></div>
           </div>
@@ -523,6 +542,80 @@ export default function App() {
           </AnimatePresence>
         )}
       </main>
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {showSettings && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="flex items-center justify-center"
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000, backdropFilter: 'blur(8px)' }}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
+              className="glass-panel p-8" style={{ width: '500px' }}
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold">System Settings</h3>
+                <XCircle className="text-gray-500 cursor-pointer hover:text-white" onClick={() => setShowSettings(false)} />
+              </div>
+              <div className="flex flex-col gap-6">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="font-bold">Real-time Crawling</p>
+                    <p className="text-xs text-gray-400">Enable/disable distributed detection network</p>
+                  </div>
+                  <div className="w-12 h-6 rounded-full bg-cyan-400/20 p-1 flex justify-end cursor-pointer">
+                    <div className="w-4 h-4 bg-cyan-400 rounded-full"></div>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="font-bold">Auto-Takedown</p>
+                    <p className="text-xs text-gray-400">Issue DMCA automatically for &gt;95% matches</p>
+                  </div>
+                  <div className="w-12 h-6 rounded-full bg-white/10 p-1 flex justify-start cursor-pointer">
+                    <div className="w-4 h-4 bg-gray-500 rounded-full"></div>
+                  </div>
+                </div>
+                <button className="btn-primary w-full mt-4" onClick={() => setShowSettings(false)}>SAVE CHANGES</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Notifications Dropdown */}
+      <AnimatePresence>
+        {showNotifications && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+            className="glass-panel p-4"
+            style={{ position: 'fixed', top: '80px', right: '32px', width: '320px', zIndex: 900 }}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h4 className="font-bold text-sm">Recent Alerts</h4>
+              <button className="text-[10px] text-cyan-400 bg-transparent border-none cursor-pointer" onClick={() => setNotifications([])}>CLEAR ALL</button>
+            </div>
+            <div className="flex flex-col gap-3">
+              {notifications.length === 0 ? (
+                <p className="text-xs text-gray-500 text-center py-4">No new alerts</p>
+              ) : (
+                notifications.map(notif => (
+                  <div key={notif.id} className="p-3 bg-white/5 rounded-lg border border-white/5 flex gap-3 items-start">
+                    <AlertTriangle size={16} className="text-rose-400 mt-1" />
+                    <div>
+                      <p className="text-[11px] font-bold">{notif.asset_name}</p>
+                      <p className="text-[10px] text-gray-400">Detected on {notif.platform}</p>
+                      <p className="text-[10px] text-cyan-400 mt-1">{notif.match_score}% Match</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
