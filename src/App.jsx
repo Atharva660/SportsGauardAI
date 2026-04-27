@@ -417,10 +417,20 @@ export default function App() {
                         <div className="p-3 rounded-lg bg-cyan-500/10 text-cyan-400">
                           <ShieldCheck size={24} />
                         </div>
-                        <MoreVertical className="text-gray-500 cursor-pointer" />
+                        <div className="flex flex-col items-end">
+                           <span className="text-[10px] font-bold text-cyan-400 border border-cyan-400/30 px-2 py-0.5 rounded mb-2">AI AUDITED</span>
+                           <MoreVertical className="text-gray-500 cursor-pointer" />
+                        </div>
                       </div>
                       <h4 className="font-bold text-lg mb-1">{asset.name}</h4>
-                      <p className="text-xs text-gray-500 mb-4">{asset.type} • Created {new Date(asset.created_at * 1000).toLocaleDateString()}</p>
+                      <p className="text-xs text-gray-500 mb-2">{asset.type} • Created {new Date(asset.created_at * 1000).toLocaleDateString()}</p>
+                      
+                      <div className="bg-white/5 p-3 rounded-lg mb-4">
+                        <p className="text-[11px] text-gray-400 leading-relaxed italic">
+                          "{asset.description || 'AI analysis in progress...'}"
+                        </p>
+                      </div>
+
                       <div className="flex flex-col gap-2">
                         <div className="flex justify-between text-xs">
                           <span className="text-gray-400">Fingerprint ID:</span>

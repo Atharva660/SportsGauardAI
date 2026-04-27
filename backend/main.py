@@ -3,15 +3,33 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 import random
 import uuid
+import sqlite3
+import os
 from pydantic import BaseModel
 from typing import List, Optional
-import imagehash
-from PIL import Image
-import io
+import google.generativeai as genai
+from dotenv import load_dotenv
 
-app = FastAPI(title="SportGuard AI API")
+load_dotenv()
 
-# Enable CORS for frontend integration
+# --- CONFIGURATION ---
+# Replace with your actual key from https://aistudio.google.com/
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyC6p7FR_8G9akIuS7Ub8tIOpbwHm5-lNFc")
+
+# Initialize Gemini with the latest Gemini 3 model
+if GEMINI_API_KEY and "YOUR_GEMINI" not in GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        # Using Gemini 3 Flash for maximum speed and accuracy in video analysis
+        model = genai.GenerativeModel('gemini-3-flash-preview')
+    except Exception:
+        model = None
+else:
+    model = None
+
+app = FastAPI(title="SportGuard AI Pro API")
+
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,18 +38,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mock Databases
-assets = []
-detections = []
-monitoring_platforms = ["YouTube", "Twitter/X", "TikTok", "Telegram", "Instagram", "Reddit", "Discord", "Twitch"]
-last_simulation_time = time.time()
+# --- DATABASE SETUP ---
+DB_PATH = "sportguard.db"
 
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS assets (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            type TEXT,
+            status TEXT,
+            fingerprint TEXT,
+            description TEXT,
+            created_at REAL
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS detections (
+            id TEXT PRIMARY KEY,
+            asset_id TEXT,
+            asset_name TEXT,
+            platform TEXT,
+            url TEXT,
+            match_score REAL,
+            risk_level TEXT,
+            status TEXT,
+            view_count INTEGER,
+            timestamp REAL,
+            FOREIGN KEY(asset_id) REFERENCES assets(id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# --- MODELS ---
 class Asset(BaseModel):
     id: str
     name: str
     type: str
     status: str
     fingerprint: str
+    description: Optional[str]
     created_at: float
 
 class Detection(BaseModel):
@@ -46,42 +97,30 @@ class Detection(BaseModel):
     view_count: int
     timestamp: float
 
-# Initial Seed Data
-@app.on_event("startup")
-async def startup_event():
-    # Add some mock assets
-    asset_id = str(uuid.uuid4())
-    assets.append({
-        "id": asset_id,
-        "name": "Champions League Final - Goal Highlight",
-        "type": "Video",
-        "status": "Protected",
-        "fingerprint": "phash_8a2b3c4d5e6f",
-        "created_at": time.time() - 86400
-    })
-    
-    # Add some mock detections
-    for i in range(5):
-        detections.append({
-            "id": str(uuid.uuid4()),
-            "asset_id": asset_id,
-            "asset_name": "Champions League Final - Goal Highlight",
-            "platform": random.choice(monitoring_platforms),
-            "url": f"https://{random.choice(['t.me', 'vimeo.com', 'streamable.com'])}/v/{random.randint(10000, 99999)}",
-            "match_score": round(random.uniform(85, 99.9), 2),
-            "risk_level": "High" if random.random() > 0.5 else "Medium",
-            "status": "Pending",
-            "view_count": random.randint(100, 50000),
-            "timestamp": time.time() - random.randint(60, 3600)
-        })
+# --- SIMULATION STATE ---
+last_simulation_time = time.time()
+monitoring_platforms = ["YouTube", "Twitter/X", "TikTok", "Telegram", "Instagram", "Reddit", "Discord", "Twitch"]
+
+# --- API ENDPOINTS ---
 
 @app.get("/api/stats")
 async def get_stats():
-    # Simulate real-time growth and fluctuation
-    active_pending = len([d for d in detections if d["status"] == "Pending"])
-    takedowns = len([d for d in detections if d["status"] == "Takedown Issued"])
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT COUNT(*) FROM assets")
+    asset_count = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM detections WHERE status = 'Pending'")
+    active_pending = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM detections WHERE status = 'Takedown Issued'")
+    takedowns = cursor.fetchone()[0]
+    
+    conn.close()
+    
     return {
-        "assets_protected": len(assets),
+        "assets_protected": asset_count,
         "active_detections": active_pending,
         "takedowns_issued": takedowns,
         "roi_estimated": f"${(takedowns * 450) + random.randint(10, 500):,}",
@@ -90,90 +129,111 @@ async def get_stats():
 
 @app.get("/api/assets", response_model=List[Asset])
 async def get_assets():
-    return assets
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM assets ORDER BY created_at DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 @app.post("/api/assets/enroll")
 async def enroll_asset(name: str = Form(...), type: str = Form(...), file: UploadFile = File(None)):
     asset_id = str(uuid.uuid4())
     fingerprint = "phash_" + uuid.uuid4().hex[:12]
-    new_asset = {
-        "id": asset_id,
-        "name": name,
-        "type": type,
-        "status": "Protected",
-        "fingerprint": fingerprint,
-        "created_at": time.time()
-    }
-    assets.append(new_asset)
+    description = "Awaiting AI Audit..."
     
-    # Trigger an immediate "WOW" detection for the newly enrolled asset
-    detections.append({
-        "id": str(uuid.uuid4()),
-        "asset_id": asset_id,
-        "asset_name": name,
-        "platform": random.choice(["Telegram", "YouTube", "Twitter/X"]),
-        "url": f"https://piratesite.net/watch/{uuid.uuid4().hex[:8]}",
-        "match_score": round(random.uniform(94, 99.8), 2),
-        "risk_level": "High",
-        "status": "Pending",
-        "view_count": random.randint(10, 50),
-        "timestamp": time.time()
-    })
+    # --- REAL AI AUDIT (GEMINI) ---
+    if model and file:
+        try:
+            # For a prototype, we just send the name to Gemini to "Audit" its legitimacy
+            # In production, you'd send the actual video file/bytes
+            prompt = f"Act as a Sports Media Auditor. Provide a 1-sentence technical description for a sports media asset named: {name}. Focus on its value and copyright sensitivity."
+            response = model.generate_content(prompt)
+            description = response.text.strip()
+        except Exception as e:
+            description = f"Audit Error: {str(e)}"
     
-    return new_asset
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO assets (id, name, type, status, fingerprint, description, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (asset_id, name, type, "Protected", fingerprint, description, time.time())
+    )
+    
+    # Trigger an immediate detection to show the system is working
+    det_id = str(uuid.uuid4())
+    cursor.execute(
+        "INSERT INTO detections (id, asset_id, asset_name, platform, url, match_score, risk_level, status, view_count, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (det_id, asset_id, name, random.choice(monitoring_platforms), f"https://pirate-portal.tv/v/{uuid.uuid4().hex[:6]}", round(random.uniform(92, 99.5), 2), "High", "Pending", random.randint(5, 100), time.time())
+    )
+    
+    conn.commit()
+    conn.close()
+    
+    return {"id": asset_id, "name": name, "status": "Protected"}
 
 @app.get("/api/detections", response_model=List[Detection])
 async def get_detections():
     global last_simulation_time
-    # Faster simulation: find new piracy clips every 8 seconds
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Smart Simulation: Only generate detections if we have assets
     current_time = time.time()
-    if current_time - last_simulation_time > 8 and assets:
-        asset = random.choice(assets)
-        new_det = {
-            "id": str(uuid.uuid4()),
-            "asset_id": asset["id"],
-            "asset_name": asset["name"],
-            "platform": random.choice(monitoring_platforms),
-            "url": f"https://{random.choice(['t.me', 'vimeo.com', 'streamable.com', 'x.com'])}/v/{random.randint(100000, 999999)}",
-            "match_score": round(random.uniform(88, 99.9), 2),
-            "risk_level": "High" if random.random() > 0.4 else "Medium",
-            "status": "Pending",
-            "view_count": random.randint(50, 1000),
-            "timestamp": current_time
-        }
-        detections.append(new_det)
-        last_simulation_time = current_time
+    if current_time - last_simulation_time > 15:
+        cursor.execute("SELECT id, name FROM assets")
+        assets_list = cursor.fetchall()
         
-    return sorted(detections, key=lambda x: x["timestamp"], reverse=True)
+        if assets_list:
+            target = random.choice(assets_list)
+            det_id = str(uuid.uuid4())
+            cursor.execute(
+                "INSERT INTO detections (id, asset_id, asset_name, platform, url, match_score, risk_level, status, view_count, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (det_id, target['id'], target['name'], random.choice(monitoring_platforms), f"https://stream-rip.io/match/{random.randint(1000, 9999)}", round(random.uniform(85, 99.9), 2), "High" if random.random() > 0.4 else "Medium", "Pending", random.randint(50, 5000), current_time)
+            )
+            conn.commit()
+            last_simulation_time = current_time
+    
+    cursor.execute("SELECT * FROM detections ORDER BY timestamp DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 @app.post("/api/detections/{detection_id}/takedown")
 async def issue_takedown(detection_id: str):
-    for d in detections:
-        if d["id"] == detection_id:
-            d["status"] = "Takedown Issued"
-            return {"status": "success", "message": "DMCA notice generated and sent to platform."}
-    return {"status": "error", "message": "Detection not found"}
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE detections SET status = 'Takedown Issued' WHERE id = ?", (detection_id,))
+    if cursor.rowcount == 0:
+        conn.close()
+        return {"status": "error", "message": "Detection not found"}
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": "DMCA notice issued."}
 
 @app.get("/api/analytics/platforms")
 async def platform_analytics():
-    stats = {}
-    for d in detections:
-        stats[d["platform"]] = stats.get(d["platform"], 0) + 1
-    return [{"name": platform, "value": count} for platform, count in stats.items()]
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT platform, COUNT(*) FROM detections GROUP BY platform")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"name": row[0], "value": row[1]} for row in rows]
 
 @app.get("/api/analytics/trends")
 async def trend_analytics():
-    # Dynamic trend data based on current detection counts
-    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    base_detections = [45, 52, 38, 65, 48, 89, len(detections)]
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM detections")
+    total = cursor.fetchone()[0]
+    conn.close()
     
-    return [
-        {
-            "day": days[i], 
-            "detections": base_detections[i] + random.randint(-2, 2), 
-            "takedowns": int(base_detections[i] * 0.8) + random.randint(-1, 1)
-        } for i in range(7)
-    ]
+    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    # Base numbers + current live data
+    base = [45, 52, 38, 65, 48, 89, total]
+    return [{"day": days[i], "detections": base[i] + random.randint(-2, 2), "takedowns": int(base[i]*0.8)} for i in range(7)]
 
 if __name__ == "__main__":
     import uvicorn

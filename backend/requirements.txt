@@ -5,3 +5,4 @@ pydantic
 imagehash
 Pillow
 python-dotenv
+google-generativeai
